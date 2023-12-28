@@ -188,7 +188,6 @@ func (m *Manager) startWorker(workerId int) {
 	logrus.Debugf("starting worker %d", workerId)
 
 	for {
-	workerLoop:
 		select {
 		case <-m.debugTick.C:
 			// m.consensusCluster.Details()
@@ -254,324 +253,341 @@ func (m *Manager) startWorker(workerId int) {
 			switch task := data.(type) {
 
 			case StopWorkerTask:
+				logrus.Warn("StopWorkerTask!")
 				defer task.wg.Done()
 				return
-
-			case rpc.PartitionsHealthCheckTask:
-				// logrus.Warn("PartitionsHealthCheckTask")
-				err := m.consistencyController.IsHealthy()
-				task.ResCh <- err
-
-			case rpc.UpdateMembersTask:
-				var err error
-
-				if m.consensusCluster.Isleader() == false {
-					task.ResCh <- true
-					continue
-				}
-				if m.ring.CompareMembers(task.Members, task.TempMembers) == true {
-					// logrus.Warn("members already changed")
-					task.ResCh <- true
-					continue
-				}
-
-				err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch(), task.Members, task.TempMembers)
-				if err != nil {
-					logrus.Error("UpdateFsm err = %v", err)
-					task.ResCh <- err
-					continue
-				}
-
-				task.ResCh <- true
-
-			case rpc.UpdateEpochTask:
-				var err error
-
-				if m.consensusCluster.Isleader() == false {
-					task.ResCh <- true
-					continue
-				}
-
-				if m.LastEpochUpdateId == task.UpdateId {
-					task.ResCh <- true
-					continue
-				}
-
-				logrus.Warnf("UpdateEpochTask %s", task.UpdateId)
-
-				err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch()+1, m.ring.GetMembersNames(false), m.ring.GetMembersNames(true))
-				if err != nil {
-					logrus.Warnf("UpdateEpochTask UpdateMembers err = %v", err)
-					task.ResCh <- err
-				}
-
-				err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch()+1, m.ring.GetMembersNames(false), m.ring.GetMembersNames(true))
-				if err != nil {
-					logrus.Warnf("UpdateEpochTask UpdateMembers err = %v", err)
-					task.ResCh <- err
-				}
-
-				m.LastEpochUpdateId = task.UpdateId
-
-				task.ResCh <- true
-
-			case http.HealthTask:
-				err := m.consensusCluster.IsHealthy()
-				if err != nil {
-					logrus.Warnf("HealthTask err = %v", err)
-					task.ResCh <- err
-					continue
-				}
-
-				task.ResCh <- true
-			case http.ReadyTask:
-				err := m.consensusCluster.IsHealthy()
-				if err != nil {
-					logrus.Debugf("IsHealthy err = %v", err)
-					task.ResCh <- err
-					continue
-				}
-
-				// err = m.ring.IsHealthy()
-				// if err != nil {
-				// 	logrus.Warnf("ring.IsHealthy err = %v", err)
-				// 	task.ResCh <- err
-				// 	continue
-				// }
-
-				// err = m.consistencyController.IsBusy()
-				// if err != nil {
-				// 	logrus.Warnf("HealthTask err = %v", err)
-				// 	task.ResCh <- err
-				// 	continue
-				// }
-
-				task.ResCh <- true
-
-			case http.SetTask:
-				logrus.Debugf("worker SetTask: %+v", task)
-				members, err := m.SetRequest(task.Key, task.Value)
-				errorStr := ""
-				if err != nil {
-					errorStr = err.Error()
-				}
-				task.ResCh <- http.SetResponse{Error: errorStr, Members: members}
-
-			case http.GetTask:
-				logrus.Debugf("worker GetTask: %+v", task)
-				value, failed_members, err := m.GetRequest(task.Key)
-				var valueStr string
-				if value != nil {
-					valueStr = value.Value
-				}
-				errorStr := ""
-				if err != nil {
-					errorStr = err.Error()
-				}
-				task.ResCh <- http.GetResponse{Value: valueStr, Error: errorStr, Failed_members: failed_members}
-
-			case gossip.JoinTask:
-				// logrus.Warnf("worker JoinTask: %+v", task)
-
-				err := m.consensusCluster.AddVoter(task.Name, task.IP)
-				if err != nil {
-					err = errors.Wrap(err, "gossip.JoinTask")
-					logrus.Error(err)
+			default:
+				if m.config.Manager.ThreadRequests {
+					go m.handleTask(data)
 				} else {
-					// logrus.Infof("AddVoter success")
+					m.handleTask(data)
 				}
+			}
 
-				_, rpcClient, err := m.rpcWrapper.CreateRpcClient(task.IP)
+		}
+	}
+}
+
+func (m *Manager) handleTask(data interface{}) {
+	switch task := data.(type) {
+
+	case StopWorkerTask:
+		defer task.wg.Done()
+		return
+
+	case rpc.PartitionsHealthCheckTask:
+		// logrus.Warn("PartitionsHealthCheckTask")
+		err := m.consistencyController.IsHealthy()
+		task.ResCh <- err
+
+	case rpc.UpdateMembersTask:
+		var err error
+
+		if m.consensusCluster.Isleader() == false {
+			task.ResCh <- true
+			return
+		}
+		if m.ring.CompareMembers(task.Members, task.TempMembers) == true {
+			// logrus.Warn("members already changed")
+			task.ResCh <- true
+			return
+		}
+
+		err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch(), task.Members, task.TempMembers)
+		if err != nil {
+			logrus.Error("UpdateFsm err = %v", err)
+			task.ResCh <- err
+			return
+		}
+
+		task.ResCh <- true
+
+	case rpc.UpdateEpochTask:
+		var err error
+
+		if m.consensusCluster.Isleader() == false {
+			task.ResCh <- true
+			return
+		}
+
+		if m.LastEpochUpdateId == task.UpdateId {
+			task.ResCh <- true
+			return
+		}
+
+		logrus.Warnf("UpdateEpochTask %s", task.UpdateId)
+
+		err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch()+1, m.ring.GetMembersNames(false), m.ring.GetMembersNames(true))
+		if err != nil {
+			logrus.Warnf("UpdateEpochTask UpdateMembers err = %v", err)
+			task.ResCh <- err
+		}
+
+		err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch()+1, m.ring.GetMembersNames(false), m.ring.GetMembersNames(true))
+		if err != nil {
+			logrus.Warnf("UpdateEpochTask UpdateMembers err = %v", err)
+			task.ResCh <- err
+		}
+
+		m.LastEpochUpdateId = task.UpdateId
+
+		task.ResCh <- true
+
+	case http.HealthTask:
+		err := m.consensusCluster.IsHealthy()
+		if err != nil {
+			logrus.Warnf("HealthTask err = %v", err)
+			task.ResCh <- err
+			return
+		}
+
+		task.ResCh <- true
+	case http.ReadyTask:
+		err := m.consensusCluster.IsHealthy()
+		if err != nil {
+			logrus.Debugf("IsHealthy err = %v", err)
+			task.ResCh <- err
+			return
+		}
+
+		// err = m.ring.IsHealthy()
+		// if err != nil {
+		// 	logrus.Warnf("ring.IsHealthy err = %v", err)
+		// 	task.ResCh <- err
+		// 	continue
+		// }
+
+		// err = m.consistencyController.IsBusy()
+		// if err != nil {
+		// 	logrus.Warnf("HealthTask err = %v", err)
+		// 	task.ResCh <- err
+		// 	continue
+		// }
+
+		task.ResCh <- true
+
+	case http.SetTask:
+		logrus.Debugf("worker SetTask: %+v", task)
+		members, err := m.SetRequest(task.Key, task.Value)
+		errorStr := ""
+		if err != nil {
+			errorStr = err.Error()
+		}
+		task.ResCh <- http.SetResponse{Error: errorStr, Members: members}
+
+	case http.GetTask:
+		logrus.Debugf("worker GetTask: %+v", task)
+		value, failed_members, err := m.GetRequest(task.Key)
+		var valueStr string
+		if value != nil {
+			valueStr = value.Value
+		}
+		errorStr := ""
+		if err != nil {
+			errorStr = err.Error()
+		}
+		task.ResCh <- http.GetResponse{Value: valueStr, Error: errorStr, Failed_members: failed_members}
+
+	case gossip.JoinTask:
+		// logrus.Warnf("worker JoinTask: %+v", task)
+
+		err := m.consensusCluster.AddVoter(task.Name, task.IP)
+		if err != nil {
+			err = errors.Wrap(err, "gossip.JoinTask")
+			logrus.Error(err)
+		} else {
+			// logrus.Infof("AddVoter success")
+		}
+
+		_, rpcClient, err := m.rpcWrapper.CreateRpcClient(task.IP)
+		if err != nil {
+			err = errors.Wrap(err, "gossip.JoinTask")
+			logrus.Fatal(err)
+			return
+		}
+		m.clientManager.AddClient(task.Name, rpcClient)
+
+		if m.config.Manager.Operator == false {
+			err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch(), m.gossipCluster.GetMembersNames(), m.gossipCluster.GetMembersNames())
+			if err != nil {
+				logrus.Warnf("JoinTask UpdateMembers err = %v", err)
+			}
+		}
+
+	case gossip.LeaveTask:
+		// logrus.Warnf("worker LeaveTask: %+v", task)
+		m.clientManager.RemoveClient(task.Name)
+		m.consensusCluster.RemoveServer(task.Name)
+		if m.config.Manager.Operator == false {
+			err := m.consensusCluster.UpdateFsm(m.GetCurrentEpoch(), m.gossipCluster.GetMembersNames(), m.gossipCluster.GetMembersNames())
+			if err != nil {
+				logrus.Warnf("JoinTask UpdateMembers err = %v", err)
+			}
+		}
+
+	case consensus.FsmTask:
+		logrus.Warnf("FsmTask Epoch %v Members %v TempMembers %v", task.Epoch, len(task.Members), len(task.TempMembers))
+		m.SetCurrentEpoch(task.Epoch)
+		m.consistencyController.PublishEpoch(task.Epoch)
+
+		m.ring.SetRingMembers(task.Members, task.TempMembers)
+		task.ResCh <- true
+
+	case rpc.SetValueTask:
+		logrus.Debugf("worker SetValueTask: %+v", task)
+
+		if task.Value.Epoch < m.GetCurrentEpoch()-1 {
+			task.ResCh <- errors.New("cannot set lagging epoch")
+			return
+		}
+		err := m.SetValue(task.Value)
+		if err != nil {
+			logrus.Warnf("SetValue err = %v", err)
+			task.ResCh <- err
+		} else {
+			task.ResCh <- true
+		}
+
+	case rpc.GetValueTask:
+		logrus.Debugf("worker GetValueTask: %+v", task)
+		// value, err := m.db.Get([]byte(task.Key))
+		value, err := m.GetValue(task.Key)
+		if err == storage.KEY_NOT_FOUND { // TODO if the nodes partition is not up to date it should not count as response
+			task.ResCh <- nil
+		} else if err != nil {
+			task.ResCh <- err
+		} else {
+			task.ResCh <- value
+		}
+
+	case rpc.StreamBucketsTask: // TODO test this is returning right values
+		logrus.Debugf("worker StreamBucketsTask: %+v", task)
+		var buckets []int32 = task.Buckets
+		if len(buckets) == 0 {
+			for i := 0; i < m.config.Manager.PartitionBuckets; i++ {
+				buckets = append(buckets, int32(i))
+			}
+		}
+		for _, bucket := range buckets {
+			index1, err := BuildEpochIndex(int(task.PartitionId), uint64(bucket), task.LowerEpoch, "")
+			if err != nil {
+				logrus.Fatal(err)
+				continue
+			}
+			index2, err := BuildEpochIndex(int(task.PartitionId), uint64(bucket), task.UpperEpoch, "")
+			if err != nil {
+				logrus.Fatal(err)
+				continue
+			}
+			it := m.db.NewIterator(
+				[]byte(index1),
+				[]byte(index2),
+				false,
+			)
+			for !it.IsDone() {
+				_, _, epoch, key, err := ParseEpochIndex(string(it.Key()))
 				if err != nil {
-					err = errors.Wrap(err, "gossip.JoinTask")
 					logrus.Fatal(err)
 					continue
 				}
-				m.clientManager.AddClient(task.Name, rpcClient)
-
-				if m.config.Manager.Operator == false {
-					err = m.consensusCluster.UpdateFsm(m.GetCurrentEpoch(), m.gossipCluster.GetMembersNames(), m.gossipCluster.GetMembersNames())
-					if err != nil {
-						logrus.Warnf("JoinTask UpdateMembers err = %v", err)
-					}
-				}
-
-			case gossip.LeaveTask:
-				// logrus.Warnf("worker LeaveTask: %+v", task)
-				m.clientManager.RemoveClient(task.Name)
-				m.consensusCluster.RemoveServer(task.Name)
-				if m.config.Manager.Operator == false {
-					err := m.consensusCluster.UpdateFsm(m.GetCurrentEpoch(), m.gossipCluster.GetMembersNames(), m.gossipCluster.GetMembersNames())
-					if err != nil {
-						logrus.Warnf("JoinTask UpdateMembers err = %v", err)
-					}
-				}
-
-			case consensus.FsmTask:
-				logrus.Warnf("FsmTask Epoch %v Members %v TempMembers %v", task.Epoch, len(task.Members), len(task.TempMembers))
-				m.SetCurrentEpoch(task.Epoch)
-				m.consistencyController.PublishEpoch(task.Epoch)
-
-				m.ring.SetRingMembers(task.Members, task.TempMembers)
-				task.ResCh <- true
-
-			case rpc.SetValueTask:
-				logrus.Debugf("worker SetValueTask: %+v", task)
-
-				if task.Value.Epoch < m.GetCurrentEpoch()-1 {
-					task.ResCh <- errors.New("cannot set lagging epoch")
-					continue
-				}
-				err := m.SetValue(task.Value)
+				timestamp, err := utils.DecodeBytesToInt64(it.Value())
 				if err != nil {
-					logrus.Warnf("SetValue err = %v", err)
-					task.ResCh <- err
-				} else {
-					task.ResCh <- true
-				}
-
-			case rpc.GetValueTask:
-				logrus.Debugf("worker GetValueTask: %+v", task)
-				// value, err := m.db.Get([]byte(task.Key))
-				value, err := m.GetValue(task.Key)
-				if err == storage.KEY_NOT_FOUND { // TODO if the nodes partition is not up to date it should not count as response
-					task.ResCh <- nil
-				} else if err != nil {
-					task.ResCh <- err
-				} else {
-					task.ResCh <- value
-				}
-
-			case rpc.StreamBucketsTask: // TODO test this is returning right values
-				logrus.Debugf("worker StreamBucketsTask: %+v", task)
-				var buckets []int32 = task.Buckets
-				if len(buckets) == 0 {
-					for i := 0; i < m.config.Manager.PartitionBuckets; i++ {
-						buckets = append(buckets, int32(i))
-					}
-				}
-				for _, bucket := range buckets {
-					index1, err := BuildEpochIndex(int(task.PartitionId), uint64(bucket), task.LowerEpoch, "")
-					if err != nil {
-						logrus.Fatal(err)
-						continue
-					}
-					index2, err := BuildEpochIndex(int(task.PartitionId), uint64(bucket), task.UpperEpoch, "")
-					if err != nil {
-						logrus.Fatal(err)
-						continue
-					}
-					it := m.db.NewIterator(
-						[]byte(index1),
-						[]byte(index2),
-						false,
-					)
-					for !it.IsDone() {
-						_, _, epoch, key, err := ParseEpochIndex(string(it.Key()))
-						if err != nil {
-							logrus.Fatal(err)
-							continue
-						}
-						timestamp, err := utils.DecodeBytesToInt64(it.Value())
-						if err != nil {
-							logrus.Fatal(err)
-							continue
-						}
-
-						task.ResCh <- &rpc.RpcValue{Key: key, Epoch: epoch, UnixTimestamp: timestamp}
-						it.Next()
-					}
-					it.Release()
-				}
-
-				close(task.ResCh)
-
-			case VerifyPartitionEpochRequestTask:
-				logrus.Debugf("worker VerifyPartitionEpochRequestTask: %+v", task.PartitionId)
-				err := m.VerifyEpoch(task.PartitionId, task.Epoch)
-
-				if err != nil {
-					task.ResCh <- err
-				} else {
-					task.ResCh <- VerifyPartitionEpochResponse{Valid: true}
-				}
-
-			case rpc.GetEpochTreeObjectTask:
-				logrus.Debugf("worker GetPartitionEpochObjectTask: %+v", task)
-				index, err := BuildEpochTreeObjectIndex(int(task.PartitionId), task.LowerEpoch)
-				if err != nil {
-					task.ResCh <- err
+					logrus.Fatal(err)
 					continue
 				}
 
-				epochTreeObjectBytes, err := m.db.Get([]byte(index))
-				if err != nil {
-					// logrus.Warnf("GetEpochTreeObjectTask err = %v index %v  active: %v", err, index, m.consistencyController.IsPartitionActive(int(task.PartitionId)))
-					err = errors.Wrapf(err, "active: %v", m.consistencyController.IsPartitionActive(int(task.PartitionId)))
-					task.ResCh <- err
-					continue
-				}
-
-				epochTreeObject := &rpc.RpcEpochTreeObject{}
-				err = proto.Unmarshal(epochTreeObjectBytes, epochTreeObject)
-				if err != nil {
-					task.ResCh <- err
-					continue
-				}
-				task.ResCh <- epochTreeObject
-
-			case rpc.GetEpochTreeLastValidObjectTask:
-				logrus.Debugf("worker GetEpochTreeLastValidObjectTask: %+v", task)
-				epochTreeObjectLastValid, err := m.GetEpochTreeLastValid(task.PartitionId)
-				if err != nil {
-					task.ResCh <- err
-				} else if epochTreeObjectLastValid == nil {
-					task.ResCh <- errors.New("no valid EpochTreeObject for partition")
-				} else {
-					task.ResCh <- epochTreeObjectLastValid
-				}
-
-			case SyncPartitionTask:
-				logrus.Debugf("worker SyncPartitionTask: %+v", task.PartitionId)
-				epochTreeObjectLastValid, err := m.GetEpochTreeLastValid(task.PartitionId)
-				if err != nil {
-					task.ResCh <- errors.Wrap(err, "GetEpochTreeLastValid")
-					continue
-				} else if epochTreeObjectLastValid != nil && epochTreeObjectLastValid.LowerEpoch >= task.UpperEpoch { // TODO validate this is the correct compare
-					task.ResCh <- nil
-					continue
-				}
-
-				lastValidEpoch := int64(0)
-				if epochTreeObjectLastValid != nil {
-					lastValidEpoch = epochTreeObjectLastValid.LowerEpoch
-				}
-
-				logrus.Debugf("sync lastValidEpoch %d", lastValidEpoch)
-
-				// find most healthy node
-				err = m.PoliteStreamRequest(int(task.PartitionId), lastValidEpoch, task.UpperEpoch+1, nil)
-
-				if err != nil {
-					logrus.Debug(err)
-					task.ResCh <- SyncPartitionResponse{Valid: false, LowerEpoch: lastValidEpoch, UpperEpoch: task.UpperEpoch + 1}
-				} else {
-					task.ResCh <- SyncPartitionResponse{Valid: true, LowerEpoch: lastValidEpoch, UpperEpoch: task.UpperEpoch + 1}
-				}
-
-			case hashring.RingUpdateTask:
-				// logrus.Warnf("worker MembersUpdateTask #%+v", len(task.Partitions))
-
-				currPartitions := utils.NewIntSet().From(task.Partitions)
-				m.consistencyController.HandleHashringChange(currPartitions)
-
-				task.ResCh <- true
-
-			default:
-				logrus.Panicf("worker unkown task type: %v", reflect.TypeOf(task))
-				break workerLoop
+				task.ResCh <- &rpc.RpcValue{Key: key, Epoch: epoch, UnixTimestamp: timestamp}
+				it.Next()
 			}
+			it.Release()
 		}
+
+		close(task.ResCh)
+
+	case VerifyPartitionEpochRequestTask:
+		logrus.Debugf("worker VerifyPartitionEpochRequestTask: %+v", task.PartitionId)
+		err := m.VerifyEpoch(task.PartitionId, task.Epoch)
+
+		if err != nil {
+			task.ResCh <- err
+		} else {
+			task.ResCh <- VerifyPartitionEpochResponse{Valid: true}
+		}
+
+	case rpc.GetEpochTreeObjectTask:
+		logrus.Debugf("worker GetPartitionEpochObjectTask: %+v", task)
+		index, err := BuildEpochTreeObjectIndex(int(task.PartitionId), task.LowerEpoch)
+		if err != nil {
+			task.ResCh <- err
+			return
+		}
+
+		epochTreeObjectBytes, err := m.db.Get([]byte(index))
+		if err != nil {
+			// logrus.Warnf("GetEpochTreeObjectTask err = %v index %v  active: %v", err, index, m.consistencyController.IsPartitionActive(int(task.PartitionId)))
+			err = errors.Wrapf(err, "active: %v", m.consistencyController.IsPartitionActive(int(task.PartitionId)))
+			task.ResCh <- err
+			return
+		}
+
+		epochTreeObject := &rpc.RpcEpochTreeObject{}
+		err = proto.Unmarshal(epochTreeObjectBytes, epochTreeObject)
+		if err != nil {
+			task.ResCh <- err
+			return
+		}
+		task.ResCh <- epochTreeObject
+
+	case rpc.GetEpochTreeLastValidObjectTask:
+		logrus.Debugf("worker GetEpochTreeLastValidObjectTask: %+v", task)
+		epochTreeObjectLastValid, err := m.GetEpochTreeLastValid(task.PartitionId)
+		if err != nil {
+			task.ResCh <- err
+		} else if epochTreeObjectLastValid == nil {
+			task.ResCh <- errors.New("no valid EpochTreeObject for partition")
+		} else {
+			task.ResCh <- epochTreeObjectLastValid
+		}
+
+	case SyncPartitionTask:
+		logrus.Debugf("worker SyncPartitionTask: %+v", task.PartitionId)
+		epochTreeObjectLastValid, err := m.GetEpochTreeLastValid(task.PartitionId)
+		if err != nil {
+			task.ResCh <- errors.Wrap(err, "GetEpochTreeLastValid")
+			return
+		} else if epochTreeObjectLastValid != nil && epochTreeObjectLastValid.LowerEpoch >= task.UpperEpoch { // TODO validate this is the correct compare
+			task.ResCh <- nil
+			return
+		}
+
+		lastValidEpoch := int64(0)
+		if epochTreeObjectLastValid != nil {
+			lastValidEpoch = epochTreeObjectLastValid.LowerEpoch
+		}
+
+		logrus.Debugf("sync lastValidEpoch %d", lastValidEpoch)
+
+		// find most healthy node
+		err = m.PoliteStreamRequest(int(task.PartitionId), lastValidEpoch, task.UpperEpoch+1, nil)
+
+		if err != nil {
+			logrus.Debug(err)
+			task.ResCh <- SyncPartitionResponse{Valid: false, LowerEpoch: lastValidEpoch, UpperEpoch: task.UpperEpoch + 1}
+		} else {
+			task.ResCh <- SyncPartitionResponse{Valid: true, LowerEpoch: lastValidEpoch, UpperEpoch: task.UpperEpoch + 1}
+		}
+
+	case hashring.RingUpdateTask:
+		// logrus.Warnf("worker MembersUpdateTask #%+v", len(task.Partitions))
+
+		currPartitions := utils.NewIntSet().From(task.Partitions)
+		m.consistencyController.HandleHashringChange(currPartitions)
+
+		task.ResCh <- true
+
+	default:
+		logrus.Panicf("worker unkown task type: %v", reflect.TypeOf(task))
+
 	}
 }
 

@@ -8,11 +8,12 @@ import (
 )
 
 type ManagerConfig struct {
-	WokersCount          int `mapstructure:"WORKERS_COUNT"`
-	ReqChannelSize       int `mapstructure:"REQ_CHANNEL_SIZE"`
-	ReplicaCount         int `mapstructure:"REPLICA_COUNT"`
-	WriteQuorum          int `mapstructure:"WRITE_QUORUM"`
-	ReadQuorum           int `mapstructure:"READ_QUORUM"`
+	WokersCount          int  `mapstructure:"WORKERS_COUNT"`
+	ThreadRequests       bool `mapstructure:"THREAD_REQUESTS"`
+	ReqChannelSize       int  `mapstructure:"REQ_CHANNEL_SIZE"`
+	ReplicaCount         int  `mapstructure:"REPLICA_COUNT"`
+	WriteQuorum          int  `mapstructure:"WRITE_QUORUM"`
+	ReadQuorum           int  `mapstructure:"READ_QUORUM"`
 	SaveInterval         int
 	DefaultTimeout       int     `mapstructure:"DEFAULT_TIMEOUT"`
 	PartitionCount       int     `mapstructure:"PARTITION_COUNT"`

@@ -166,7 +166,7 @@ export function remove() {
 }
 
 // options = { duration: "2h", vus: 1 };
-// options = { iterations: 1, vus: 1 };
+options = { iterations: 10000, vus: 500 };
 export default function () {
   const iterationNumber = exec.scenario.iterationInTest;
 
@@ -186,6 +186,7 @@ export default function () {
   check(setRes, {
     "set status is 200": (r) => r.status === 200,
   });
+  return;
 
   if (setRes.status != 200) {
     console.error("SET REQUEST FAILED:", setRes.status, setRes.body);

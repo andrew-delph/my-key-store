@@ -6,6 +6,7 @@ manager:
   partition_buckets: 99999
   partition_concurrency: 991
   data_path: "/tmp/store/data"
+  thread_requests: true
 consensus:
   epoch_time: 9
   data_path: "/tmp/store/raft"

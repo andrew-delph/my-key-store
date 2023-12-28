@@ -1,0 +1,37 @@
+- summary
+- layout
+  - hasring
+  - partitions
+  - epoch buckets
+  - indexs + lsm
+- gossip
+  - client discovery
+  - non operator member management
+- consensus
+  - epochs
+  - members + temp members
+- hashring
+  - current members
+  - temp members
+- replication
+  - on epoch
+  - on cluster change
+- read/write quorum
+- external/internal endpoints
+- protobufs
+- indexes
+- storage
+  - indexdb
+  - badgerdb
+- operator
+  - code rollout
+  - scale cluster
+- development environment
+  - docker-compose
+  - minikube
+- benchmarks
+- future improvements
+  - scan query
+  - SAGA/2PC
+  - read repairs
+- tradeoffs

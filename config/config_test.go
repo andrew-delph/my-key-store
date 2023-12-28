@@ -62,6 +62,7 @@ func TestConfigOverwrite(t *testing.T) {
 	assert.EqualValues(t, 99999, config.Manager.PartitionBuckets, "PartitionBuckets wrong value")
 	assert.EqualValues(t, "/tmp/store/data", config.Manager.DataPath, "DataPath wrong value")
 	assert.EqualValues(t, 991, config.Manager.PartitionConcurrency, "PartitionConcurrency wrong value")
+	assert.EqualValues(t, true, config.Manager.ThreadRequests, "ThreadRequests wrong value")
 
 	// consensus config
 	assert.EqualValues(t, 9, config.Consensus.EpochTime, "EpochTime wrong value")
